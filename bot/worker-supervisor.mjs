@@ -124,7 +124,14 @@ export class WorkerSupervisor extends EventEmitter {
         env: workerEnvironment(this.baseEnvironment, server, outputPath),
         stdio: ["ignore", "pipe", "pipe"]
       });
-      const entry = { child, profile, stopping: false, ready: false };
+      const entry = {
+        child,
+        profile,
+        stopping: false,
+        controlReady: false,
+        statusReady: false,
+        ready: false
+      };
       this.entries.set(serverNumber, entry);
       this.attachLines(serverNumber, child.stdout, "stdout");
       this.attachLines(serverNumber, child.stderr, "stderr");
@@ -175,9 +182,15 @@ export class WorkerSupervisor extends EventEmitter {
     }
     const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
     lines.on("line", (line) => {
-      if (/(?:^| )msg=session-status(?: |$)/.test(line)) {
-        const entry = this.entries.get(serverNumber);
-        if (entry) entry.ready = true;
+      const entry = this.entries.get(serverNumber);
+      if (entry) {
+        if (/(?:^| )msg=control-ready(?: |$)/.test(line)) {
+          entry.controlReady = true;
+        }
+        if (/(?:^| )msg=session-status(?: |$)/.test(line)) {
+          entry.statusReady = true;
+        }
+        entry.ready = entry.controlReady && entry.statusReady;
       }
       this.emit("worker-line", { serverNumber, source, line });
     });

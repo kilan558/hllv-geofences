@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +7,18 @@ import test from "node:test";
 import { JsonStateStore } from "../bot/state-store.mjs";
 import { WorkerSupervisor } from "../bot/worker-supervisor.mjs";
 
-async function fixture(t) {
+function waitForWorkerLine(supervisor, predicate) {
+  return new Promise((resolve) => {
+    const handler = (record) => {
+      if (!predicate(record)) return;
+      supervisor.off("worker-line", handler);
+      resolve(record);
+    };
+    supervisor.on("worker-line", handler);
+  });
+}
+
+async function fixture(t, { readyMode = "both" } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hllv-supervisor-test-"));
   const workerPath = path.join(directory, "fake-worker.mjs");
   const environmentPath = path.join(directory, "worker-environment.json");
@@ -22,10 +32,29 @@ writeFileSync(process.env.TEST_ENV_PATH, JSON.stringify({
   password2: process.env.HLL_PASSWORD_2 ?? null,
   configPath: process.env.CONFIG_PATH
 }));
-console.log('level=INFO msg=session-status server_name="Test Server" map=wdeva_warfare_day mode=Warfare player_count=12 max_player_count=100 queue_count=1 max_queue_count=6');
-process.on('SIGUSR1', () => {
+const emitInitialStatus = () => console.log('level=INFO msg=session-status server_name="Test Server" map=wdeva_warfare_day mode=Warfare player_count=12 max_player_count=100 queue_count=1 max_queue_count=6');
+let controlHandlerInstalled = false;
+const installControlHandler = () => {
+  if (controlHandlerInstalled) return;
+  controlHandlerInstalled = true;
+  process.on('SIGUSR1', () => {
   console.log('level=INFO msg=session-status server_name="Test Server" map=wdeva_warfare_day mode=Warfare player_count=13 max_player_count=100 queue_count=1 max_queue_count=6');
+  });
+  console.log('level=INFO msg=control-ready');
+};
+const readyMode = process.env.TEST_READY_MODE ?? 'both';
+process.on('SIGUSR2', () => {
+  if (readyMode === 'status-first') installControlHandler();
+  if (readyMode === 'control-first') emitInitialStatus();
 });
+if (readyMode === 'status-first') {
+  emitInitialStatus();
+} else if (readyMode === 'control-first') {
+  installControlHandler();
+} else {
+  installControlHandler();
+  emitInitialStatus();
+}
 setInterval(() => {}, 1000);
 `, { mode: 0o755 });
   await chmod(workerPath, 0o755);
@@ -56,6 +85,7 @@ setInterval(() => {}, 1000);
     workerBinary: workerPath,
     applyMapBinary: "/unused/applymap",
     configDirectory: path.join(directory, "configs"),
+    statusRefreshTimeoutMs: 200,
     workerShutdownMs: 2_000
   };
   const stateStore = new JsonStateStore(path.join(directory, "state.json"));
@@ -65,6 +95,7 @@ setInterval(() => {}, 1000);
     baseEnvironment: {
       ...process.env,
       TEST_ENV_PATH: environmentPath,
+      TEST_READY_MODE: readyMode,
       HLL_HOST: "should-be-replaced",
       HLL_PORT: "1",
       HLL_PASSWORD: "should-be-replaced",
@@ -81,15 +112,31 @@ setInterval(() => {}, 1000);
     }
   });
   t.after(() => supervisor.shutdown());
-  return { directory, environmentPath, generated, stateStore, supervisor, config };
+  const releaseReady = (serverNumber = 1) => {
+    const entry = supervisor.entries.get(serverNumber);
+    assert.ok(entry, `worker ${serverNumber} must be running`);
+    assert.equal(entry.child.kill("SIGUSR2"), true);
+  };
+  return {
+    directory,
+    environmentPath,
+    generated,
+    stateStore,
+    supervisor,
+    config,
+    releaseReady
+  };
 }
 
 test("WorkerSupervisor starts a worker with only its own server tuple", async (t) => {
   const { environmentPath, generated, supervisor } = await fixture(t);
-  const linePromise = once(supervisor, "worker-line");
+  const linePromise = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=session-status(?: |$)/.test(record.line)
+  );
 
   await supervisor.start(2, "midcap-advanced");
-  const [line] = await linePromise;
+  const line = await linePromise;
 
   assert.match(line.line, /msg=session-status/);
   assert.equal(line.serverNumber, 2);
@@ -171,13 +218,64 @@ test("WorkerSupervisor preserves state updates from concurrent servers", async (
 
 test("WorkerSupervisor requests and waits for an immediate worker status refresh", async (t) => {
   const { supervisor } = await fixture(t);
-  const initialStatus = once(supervisor, "worker-line");
+  const initialStatus = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=session-status(?: |$)/.test(record.line)
+  );
   await supervisor.start(1, "midcap");
   await initialStatus;
 
   const record = await supervisor.refresh(1);
 
   assert.equal(record.serverNumber, 1);
+  assert.match(record.line, /player_count=13/);
+});
+
+test("WorkerSupervisor does not signal a worker before its control handler is ready", async (t) => {
+  const { releaseReady, supervisor } = await fixture(t, { readyMode: "status-first" });
+  const initialStatus = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=session-status(?: |$)/.test(record.line)
+  );
+  const controlReady = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=control-ready(?: |$)/.test(record.line)
+  );
+  await supervisor.start(1, "midcap");
+  await initialStatus;
+
+  await assert.rejects(
+    supervisor.refresh(1),
+    (error) => error?.code === "WORKER_NOT_READY"
+  );
+
+  releaseReady();
+  await controlReady;
+  const record = await supervisor.refresh(1);
+  assert.match(record.line, /player_count=13/);
+});
+
+test("WorkerSupervisor waits for an initial status after its control handler is ready", async (t) => {
+  const { releaseReady, supervisor } = await fixture(t, { readyMode: "control-first" });
+  const controlReady = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=control-ready(?: |$)/.test(record.line)
+  );
+  const initialStatus = waitForWorkerLine(
+    supervisor,
+    (record) => /(?:^| )msg=session-status(?: |$)/.test(record.line)
+  );
+  await supervisor.start(1, "midcap");
+  await controlReady;
+
+  await assert.rejects(
+    supervisor.refresh(1),
+    (error) => error?.code === "WORKER_NOT_READY"
+  );
+
+  releaseReady();
+  await initialStatus;
+  const record = await supervisor.refresh(1);
   assert.match(record.line, /player_count=13/);
 });
 
