@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,7 +69,7 @@ func main() {
 	// status. The Discord supervisor uses control-ready as the explicit proof
 	// that SIGUSR1 refresh requests can be delivered safely.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1)
+	signal.Notify(sigCh, signals...)
 	defer signal.Stop(sigCh)
 	logger.Info("control-ready")
 
@@ -125,7 +126,7 @@ waitForShutdown:
 		select {
 		case sig := <-sigCh:
 			logger.Info("received-os-signal", "signal", sig.String())
-			if sig == syscall.SIGUSR1 {
+			if slices.Contains(refreshSignals, sig) {
 				for _, currentWorker := range workers {
 					go func(w *worker.Worker) {
 						if err := w.RefreshStatus(ctx); err != nil {
