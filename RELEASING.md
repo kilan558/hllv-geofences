@@ -5,8 +5,8 @@
 The canonical repository is `github.com/kilan558/hllv-geofences`. Keep the Go
 module path, internal imports, package metadata, and `.github/CODEOWNERS`
 aligned with this location if the repository is ever transferred or renamed.
-Preserve `Copyright (c) 2025 Florian`, `Copyright (c) 2026 kilan558`, and all
-third-party notices.
+Preserve `Copyright (c) 2025 Florian`, the HLLV Geofences contributors notice,
+and all third-party notices.
 
 ## Pre-release verification
 
