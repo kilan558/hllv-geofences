@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify Go module integrity
+        run: |
+          go mod verify
+          go mod tidy -diff
+          go list -mod=readonly ./... >/dev/null
+
+      - name: Install Node.js dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Test Discord supervisor
+        run: npm test
+
+      - name: Check Discord supervisor syntax
+        run: npm run check
+
+      - name: Audit production Node.js dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Test Go packages
+        run: go test ./... -count=1
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l cmd/*.go cmd/applymap/*.go cmd/configcheck/*.go data/*.go maprules/*.go sync/*.go worker/*.go)
+          if [[ -n "${unformatted}" ]]; then
+            printf 'Unformatted Go files:\n%s\n' "${unformatted}" >&2
+            exit 1
+          fi
+
+      - name: Run Go static analysis
+        run: go vet ./...
+
+      - name: Build Go packages
+        run: go build ./...
+
+      - name: Scan Go dependencies for reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
+      - name: Check shell syntax
+        run: bash -n scripts/generate-config.sh tests/generate-config.test.sh
+
+      - name: Test configuration generation
+        run: ./tests/generate-config.test.sh
+
+      - name: Build container image
+        run: docker build -t hllv-geofences:ci .

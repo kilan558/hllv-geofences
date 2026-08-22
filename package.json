@@ -1,0 +1,26 @@
+{
+  "name": "hllv-geofences",
+  "version": "1.0.0",
+  "description": "Standalone HLL: Vietnam geofence worker and Discord control bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check bot/*.mjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kilan558/hllv-geofences.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kilan558/hllv-geofences/issues"
+  },
+  "homepage": "https://github.com/kilan558/hllv-geofences#readme"
+}

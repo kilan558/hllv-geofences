@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem with the geofence service.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include Discord tokens, RCON passwords, real server addresses,
+        Discord IDs, player IDs, or unredacted logs. Report security issues
+        through private vulnerability reporting instead of this form.
+
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation mode
+      options:
+        - Docker Compose with Discord
+        - Manual Go worker without Discord
+        - Configuration generation or validation
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Use a release tag or commit SHA.
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: map
+    attributes:
+      label: Vietnam map and layer
+      description: Include the RCON layer ID when the problem is map-specific.
+      placeholder: wdeva_warfare_day
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe sequence that reproduces the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      description: Remove every credential, address, Discord ID, and player identifier.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed all credentials, addresses, Discord IDs, and player identifiers.
+          required: true
+        - label: I confirmed this is not a private security report.
+          required: true

@@ -1,0 +1,27 @@
+name: hllv-geofences
+
+services:
+  geofences:
+    build:
+      context: .
+    image: hllv-geofences:local
+    user: "${GEOFENCE_UID:-1000}:${GEOFENCE_GID:-1000}"
+    env_file:
+      - "${GEOFENCE_ENV_FILE:-.env}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "./bot-data:/app/data"
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "node", "bot/healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
