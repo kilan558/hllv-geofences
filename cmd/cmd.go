@@ -64,6 +64,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Register signal handling before workers can emit their first session
+	// status. The Discord supervisor uses control-ready as the explicit proof
+	// that SIGUSR1 refresh requests can be delivered safely.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1)
+	defer signal.Stop(sigCh)
+	logger.Info("control-ready")
+
 	// Initialize workers
 	workers := make([]*worker.Worker, 0, len(c.Servers))
 	var wg sync.WaitGroup
@@ -106,10 +114,6 @@ func main() {
 			}
 		}(w)
 	}
-
-	// Listen for OS signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1)
 
 	// Variable to track if we should restart
 	shouldRestart := false
