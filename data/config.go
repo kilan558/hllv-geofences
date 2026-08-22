@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"github.com/floriansw/go-hll-rcon/rconv2"
 	"gopkg.in/yaml.v3"
@@ -236,26 +235,20 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
+	defer tmp.Close()
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
 	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
 		return err
 	}
-	if owner, ok := existing.Sys().(*syscall.Stat_t); ok &&
-		(owner.Uid != uint32(os.Geteuid()) || owner.Gid != uint32(os.Getegid())) {
-		if err := tmp.Chown(int(owner.Uid), int(owner.Gid)); err != nil {
-			tmp.Close()
-			return fmt.Errorf("preserve config ownership: %w", err)
-		}
+	if err := preserveOwnership(existing, tmp); err != nil {
+		return err
 	}
 	if _, err := tmp.Write(config); err != nil {
-		tmp.Close()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
