@@ -9,7 +9,7 @@
     "check": "node --check bot/*.mjs"
   },
   "dependencies": {
-    "discord.js": "^14.21.0"
+    "discord.js": "^14.28.1"
   },
   "engines": {
     "node": ">=18.18.0"
